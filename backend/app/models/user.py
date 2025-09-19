@@ -1,3 +1,4 @@
+from sqlalchemy.orm import relationship
 from sqlalchemy import Column, Integer, String, ForeignKey
 from app.services.database import Base
 
@@ -7,4 +8,6 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     nombre = Column(String, index=True)
     email = Column(String, unique=True, index=True)
-    role_id = Column(Integer, ForeignKey("users.id"))
+    role_id = Column(Integer, ForeignKey("roles.id"))
+
+    role = relationship("Role")  # 👈 así Pydantic puede acceder a role.rol

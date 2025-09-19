@@ -1,4 +1,4 @@
-from backend.app.models.role import Role
+from app.models.role import Role
 from app.services.database import SessionLocal
 
 def run():

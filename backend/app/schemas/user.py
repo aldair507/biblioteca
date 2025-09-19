@@ -1,24 +1,17 @@
 from pydantic import BaseModel, EmailStr
-from enum import Enum
-
-class UserRole(str, Enum):
-    Administrador = "Administrador"
-    Coordinador = "Coordinador"
-    Docente = "Docente"
-    Estudiante = "Estudiante"
-    Secretaria = "Secretaría"
-    Finanzas = "Finanzas"
+from app.schemas.role import RoleResponse
 
 class UserBase(BaseModel):
     nombre: str
     email: EmailStr
-    role: UserRole
+    role_id: int   # Se envía el ID del rol
 
 class UserCreate(UserBase):
     pass
 
 class UserResponse(UserBase):
     id: int
+    role: RoleResponse | None = None   # 👈 Para devolver el rol completo
 
     class Config:
-        from_attributes  = True
+        from_attributes = True
