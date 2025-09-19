@@ -14,12 +14,16 @@ def create_request(user_id: int, book_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     book = db.query(Book).filter(Book.id == book_id).first()
 
+    print(user, book)
+    
     if not user:
         return {"error": "Usuario no encontrado"}
-    if not book:
-        return {"error": "Libro no encontrado"}
     if book.cantidad < 1:
         return {"error": "No hay copias disponibles"}
+
+    if user.role != "Estudiante":
+      pass
+
 
     # Crear solicitud
     request = Request(user_id=user_id, book_id=book_id)
