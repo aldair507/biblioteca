@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { Book, User, Calendar, AlertCircle, Users, Crown, GraduationCap, BookOpen, Clock, Loader } from "lucide-react";
-import { getBooks, getRequests, getRoles, getUsers } from "./api/api";
+import { getBooks, getRequests, getRoles, getUsers, createRequest, updateRequest } from "./api/api";
 
 // =====================================================
-// SERVICIOS - Usando tu API existente
+// SERVICIOS - Usando tu API real
 // =====================================================
 
 class LibraryAPI {
@@ -30,35 +30,66 @@ class LibraryAPI {
   }
 
   static async createLoan(loanData) {
-    // Aquí debes implementar la llamada a tu API para crear un préstamo
-    console.log("Crear préstamo:", loanData);
-    return {
-      success: true,
-      data: { id: Date.now(), ...loanData }
-    };
+    try {
+      // Tu backend espera user_id y book_id como parámetros de query
+      const response = await createRequest(loanData.user_id, loanData.book_id);
+      return {
+        success: true,
+        data: response
+      };
+    } catch (error) {
+      console.error("Error creating loan:", error);
+      // Mostrar el error específico del backend si está disponible
+      const errorMessage = error.response?.data?.error || error.message;
+      return {
+        success: false,
+        error: errorMessage
+      };
+    }
   }
 
   static async createReservation(reservationData) {
-    // Aquí debes implementar la llamada a tu API para crear una reserva
-    console.log("Crear reserva:", reservationData);
-    return {
-      success: true,
-      data: { id: Date.now(), ...reservationData }
-    };
+    try {
+      // Para reservas también usamos createRequest pero el backend decide el estado
+      const response = await createRequest(reservationData.user_id, reservationData.book_id);
+      return {
+        success: true,
+        data: response
+      };
+    } catch (error) {
+      console.error("Error creating reservation:", error);
+      const errorMessage = error.response?.data?.error || error.message;
+      return {
+        success: false,
+        error: errorMessage
+      };
+    }
   }
 
   static async returnLoan(loanId) {
-    // Aquí debes implementar la llamada a tu API para devolver un libro
-    console.log("Devolver préstamo:", loanId);
-    return {
-      success: true,
-      data: { loanId, returnedAt: new Date().toISOString() }
-    };
+    try {
+      // Para devoluciones, necesitamos actualizar el request
+      // Pero tu endpoint PUT /requests/{request_id} no tiene cuerpo
+      // Necesitamos ver cómo maneja las devoluciones
+      
+      // Opción temporal: eliminar el request (esto depende de tu lógica de negocio)
+      const response = await updateRequest(loanId, { estado: 'devuelto' });
+      return {
+        success: true,
+        data: response
+      };
+    } catch (error) {
+      console.error("Error returning loan:", error);
+      const errorMessage = error.response?.data?.error || error.message;
+      return {
+        success: false,
+        error: errorMessage
+      };
+    }
   }
 }
-
 // =====================================================
-// HOOKS PERSONALIZADOS
+// HOOKS PERSONALIZADOS MEJORADOS
 // =====================================================
 
 const useApiData = (apiCall, dependencies = []) => {
@@ -66,24 +97,24 @@ const useApiData = (apiCall, dependencies = []) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const result = await apiCall();
-        setData(result);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const result = await apiCall();
+      setData(result);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchData();
   }, dependencies);
 
-  return { data, setData, loading, error };
+  return { data, setData, loading, error, refetch: fetchData };
 };
 
 const useNotifications = () => {
@@ -126,8 +157,7 @@ const DateUtils = {
 const ReservationUtils = {
   sortByPriority: (reservations, roles) => {
     return [...reservations].sort((a, b) => {
-      // Buscar el role_id en el usuario y obtener la prioridad del rol
-      const userA = a.user || a; // Adaptar según tu estructura
+      const userA = a.user || a;
       const userB = b.user || b;
       
       const roleA = roles.find(r => r.id === userA.role_id);
@@ -160,13 +190,16 @@ export default function LibrarySystemBackendReady() {
   const [ROLE_CONFIG, setROLE_CONFIG] = useState({});
   
   // APIs con hooks personalizados
-  const { data: books, setData: setBooks, loading: booksLoading } = useApiData(LibraryAPI.getBooks);
+  const { data: books, setData: setBooks, loading: booksLoading, refetch: refetchBooks } = useApiData(LibraryAPI.getBooks);
   const { data: users, loading: usersLoading } = useApiData(LibraryAPI.getUsers);
   const { data: roles, loading: rolesLoading } = useApiData(LibraryAPI.getRoles);
-  const { data: reservations, setData: setReservations } = useApiData(LibraryAPI.getReservations);
-  const { data: loans, setData: setLoans } = useApiData(LibraryAPI.getLoans);
+  const { data: allRequests, setData: setAllRequests, refetch: refetchRequests } = useApiData(getRequests);
   
   const { notifications, showNotification } = useNotifications();
+
+  // Filtrar requests por tipo
+  const loans = allRequests.filter(req => req.estado === 'Prestado');
+  const reservations = allRequests.filter(req => req.estado === 'pendiente');
 
   // Configurar ROLE_CONFIG cuando se cargan los roles
   useEffect(() => {
@@ -201,7 +234,7 @@ export default function LibrarySystemBackendReady() {
   }, [users, currentUser]);
 
   // =====================================================
-  // LÓGICA DE NEGOCIO ADAPTADA
+  // LÓGICA DE NEGOCIO CON API REAL
   // =====================================================
 
   const validateLoanRequest = async (bookId, userId) => {
@@ -242,44 +275,41 @@ export default function LibrarySystemBackendReady() {
     try {
       const { book, user, userRoleConfig } = await validateLoanRequest(bookId, currentUser.id);
 
-      // Calcular disponibilidad
+      // Verificar si el libro está disponible
       const bookLoans = loans.filter(l => l.book_id === bookId);
       const isAvailable = bookLoans.length === 0;
 
       if (isAvailable) {
         // Crear préstamo directo
-        const loanData = {
-          book_id: book.id,
+        const response = await LibraryAPI.createLoan({
           user_id: user.id,
-          estado: 'Prestado'
-        };
-
-        const response = await LibraryAPI.createLoan(loanData);
+          book_id: book.id
+        });
         
         if (response.success) {
-          setLoans(prev => [...prev, response.data]);
+          await refetchRequests(); // Actualizar la lista de requests
           showNotification('success', `✅ Préstamo aprobado: "${book.titulo}"`);
+        } else {
+          throw new Error(response.error || 'Error al crear el préstamo');
         }
       } else {
         // Crear reserva
-        const reservationData = {
-          book_id: book.id,
+        const response = await LibraryAPI.createReservation({
           user_id: user.id,
-          estado: 'pendiente'
-        };
-
-        const response = await LibraryAPI.createReservation(reservationData);
+          book_id: book.id
+        });
         
         if (response.success) {
-          const bookReservations = reservations.filter(r => r.book_id === bookId);
-          const newReservations = [...bookReservations, response.data];
-          const position = ReservationUtils.getUserPosition(newReservations, user.id, roles);
-          
-          setReservations(prev => [...prev, response.data]);
+          await refetchRequests(); // Actualizar la lista de requests
+          const updatedReservations = (await getRequests()).filter(req => req.estado === 'pendiente');
+          const bookReservations = updatedReservations.filter(r => r.book_id === bookId);
+          const position = ReservationUtils.getUserPosition(bookReservations, user.id, roles);
           
           showNotification('info', 
             `📋 Agregado a reservas en posición #${position} (${userRoleConfig.name})`
           );
+        } else {
+          throw new Error(response.error || 'Error al crear la reserva');
         }
       }
     } catch (error) {
@@ -293,50 +323,54 @@ export default function LibrarySystemBackendReady() {
     setIsLoading(true);
     try {
       const loan = loans.find(l => l.id === loanId);
-      if (!loan) return;
+      if (!loan) throw new Error('Préstamo no encontrado');
 
+      // Buscar siguiente reserva ANTES de devolver
+      const bookReservations = reservations.filter(r => r.book_id === loan.book_id);
+      const sortedReservations = ReservationUtils.sortByPriority(bookReservations, roles);
+      const nextReservation = sortedReservations[0];
+
+      // Devolver el libro
       const response = await LibraryAPI.returnLoan(loanId);
       
       if (response.success) {
-        setLoans(prev => prev.filter(l => l.id !== loanId));
-        
-        // Buscar siguiente reserva
-        const bookReservations = reservations.filter(r => r.book_id === loan.book_id);
-        const sortedReservations = ReservationUtils.sortByPriority(bookReservations, roles);
-        const nextReservation = sortedReservations[0];
+        await refetchRequests(); // Actualizar la lista de requests
 
         if (nextReservation) {
-          // Asignar a siguiente usuario
+          // Asignar automáticamente al siguiente en la cola
           const nextUser = users.find(u => u.id === nextReservation.user_id);
           const nextUserRoleConfig = ROLE_CONFIG[nextUser.role_id];
           
-          const newLoanData = {
-            book_id: loan.book_id,
+          // Crear nuevo préstamo para el siguiente usuario
+          const newLoanResponse = await LibraryAPI.createLoan({
             user_id: nextUser.id,
-            estado: 'Prestado'
-          };
-
-          const newLoanResponse = await LibraryAPI.createLoan(newLoanData);
+            book_id: loan.book_id
+          });
           
-          setLoans(prev => [...prev, newLoanResponse.data]);
-          setReservations(prev => prev.filter(r => r.id !== nextReservation.id));
-          
-          showNotification('info', 
-            `📢 "${loan.bookTitle || books.find(b => b.id === loan.book_id)?.titulo}" asignado a ${nextUser.nombre} (${nextUserRoleConfig.name})`
-          );
+          if (newLoanResponse.success) {
+            // Actualizar la reserva a préstamo
+            await updateRequest(nextReservation.id, { estado: 'Prestado' });
+            await refetchRequests(); // Actualizar nuevamente
+            
+            showNotification('info', 
+              `📢 "${books.find(b => b.id === loan.book_id)?.titulo}" asignado a ${nextUser.nombre} (${nextUserRoleConfig.name})`
+            );
+          }
         } else {
-          showNotification('success', `📚 Libro devuelto y disponible`);
+          showNotification('success', `📚 "${books.find(b => b.id === loan.book_id)?.titulo}" devuelto y disponible`);
         }
+      } else {
+        throw new Error(response.error || 'Error al devolver el libro');
       }
     } catch (error) {
-      showNotification('error', 'Error al devolver el libro');
+      showNotification('error', error.message);
     } finally {
       setIsLoading(false);
     }
   };
 
   // =====================================================
-  // RENDER ADAPTADO
+  // RENDER
   // =====================================================
 
   if (usersLoading || booksLoading || rolesLoading) {
@@ -364,7 +398,7 @@ export default function LibrarySystemBackendReady() {
               <Book className="h-8 w-8 text-blue-600" />
               <div>
                 <h1 className="text-2xl font-bold text-gray-800">Sistema Bibliotecario</h1>
-                <p className="text-gray-600 text-sm">Conectado a MySQL</p>
+                <p className="text-gray-600 text-sm">Conectado a API real</p>
               </div>
             </div>
             
@@ -439,6 +473,7 @@ export default function LibrarySystemBackendReady() {
                   {books.map((book) => {
                     const bookLoans = loans.filter(l => l.book_id === book.id);
                     const available = bookLoans.length === 0;
+                    const bookReservations = reservations.filter(r => r.book_id === book.id);
                     
                     return (
                       <div key={book.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
@@ -453,7 +488,9 @@ export default function LibrarySystemBackendReady() {
                             <p className={`text-sm font-medium ${available ? 'text-green-600' : 'text-red-600'}`}>
                               {available ? 'Disponible' : 'Prestado'}
                             </p>
-                            <p className="text-xs text-gray-500">1 copia total</p>
+                            <p className="text-xs text-gray-500">
+                              {bookReservations.length} en reserva
+                            </p>
                           </div>
                         </div>
                         
@@ -572,90 +609,18 @@ export default function LibrarySystemBackendReady() {
           </div>
         </div>
 
-        {/* Vista Global */}
-        <div className="bg-white rounded-lg shadow-sm border">
-          <div className="p-6 border-b">
-            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-              <Users className="h-6 w-6 text-green-600" />
-              Estado Global del Sistema
-            </h2>
-          </div>
-          <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Préstamos Globales */}
-              <div>
-                <h3 className="font-semibold text-gray-800 mb-3">Préstamos Activos ({loans.length})</h3>
-                {loans.length === 0 ? (
-                  <p className="text-gray-600 text-sm">No hay préstamos activos.</p>
-                ) : (
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {loans.map((loan) => {
-                      const book = books.find(b => b.id === loan.book_id);
-                      const user = users.find(u => u.id === loan.user_id);
-                      const roleData = ROLE_CONFIG[user?.role_id];
-                      
-                      if (!book || !user || !roleData) return null;
-                      
-                      return (
-                        <div key={loan.id} className="p-3 border rounded-lg bg-green-50">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <p className="font-medium text-sm text-gray-800">{book.titulo}</p>
-                              <p className="text-xs text-gray-600">{user.nombre}</p>
-                              <p className="text-xs text-gray-500">
-                                Prestado: {new Date(loan.created_at).toLocaleDateString('es-ES')}
-                              </p>
-                            </div>
-                            <span className={`text-xs px-2 py-1 rounded-full ${roleData.color}`}>
-                              {roleData.name}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Reservas Globales */}
-              <div>
-                <h3 className="font-semibold text-gray-800 mb-3">Cola de Reservas ({reservations.length})</h3>
-                {reservations.length === 0 ? (
-                  <p className="text-gray-600 text-sm">No hay reservas pendientes.</p>
-                ) : (
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {books.filter(book => reservations.some(r => r.book_id === book.id)).map(book => {
-                      const bookReservations = reservations.filter(r => r.book_id === book.id);
-                      const sortedReservations = ReservationUtils.sortByPriority(bookReservations, roles);
-                      
-                      return (
-                        <div key={book.id} className="border rounded-lg p-3 bg-yellow-50">
-                          <h4 className="font-medium text-sm text-gray-800 mb-2">{book.titulo}</h4>
-                          <div className="space-y-1">
-                            {sortedReservations.map((reservation, index) => {
-                              const user = users.find(u => u.id === reservation.user_id);
-                              const roleData = ROLE_CONFIG[user?.role_id];
-                              
-                              if (!user || !roleData) return null;
-                              
-                              return (
-                                <div key={reservation.id} className="flex justify-between items-center text-xs">
-                                  <span>#{index + 1} {user.nombre}</span>
-                                  <span className={`px-2 py-1 rounded-full ${roleData.color}`}>
-                                    {roleData.name}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+        {/* Botón para recargar datos */}
+        <div className="flex justify-center">
+          <button
+            onClick={() => {
+              refetchRequests();
+              refetchBooks();
+            }}
+            disabled={isLoading}
+            className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50"
+          >
+            🔄 Actualizar Datos
+          </button>
         </div>
       </div>
 
