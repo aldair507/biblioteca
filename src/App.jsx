@@ -346,50 +346,37 @@ export default function LibrarySystemBackendReady() {
     }
   };
 
-  const handleReturnBook = async (loanId) => {
-    setIsLoading(true);
-    try {
-      const loan = loans.find(l => l.id === loanId);
-      if (!loan) throw new Error('Préstamo no encontrado');
+const handleReturnBook = async (loanId) => {
+  setIsLoading(true);
+  try {
+    const loan = loans.find(l => l.id === loanId);
+    if (!loan) throw new Error('Préstamo no encontrado');
 
-      const bookReservations = reservations.filter(r => r.book_id === loan.book_id);
-      const sortedReservations = ReservationUtils.sortByPriority(bookReservations, roles);
-      const nextReservation = sortedReservations[0];
-
-      const response = await LibraryAPI.returnLoan(loanId);
-      
-      if (response.success) {
-        await refetchRequests();
-
-        if (nextReservation) {
-          const nextUser = users.find(u => u.id === nextReservation.user_id);
-          const nextUserRoleConfig = ROLE_CONFIG[nextUser.role_id];
-          
-          const newLoanResponse = await LibraryAPI.createLoan({
-            user_id: nextUser.id,
-            book_id: loan.book_id
-          });
-          
-          if (newLoanResponse.success) {
-            await updateRequest(nextReservation.id, { estado: 'Prestado' });
-            await refetchRequests();
-            
-            showNotification('info', 
-              `📢 "${books.find(b => b.id === loan.book_id)?.titulo}" asignado a ${nextUser.nombre} (${nextUserRoleConfig.name})`
-            );
-          }
-        } else {
-          showNotification('success', `📚 "${books.find(b => b.id === loan.book_id)?.titulo}" devuelto y disponible`);
-        }
-      } else {
-        throw new Error(response.error || 'Error al devolver el libro');
-      }
-    } catch (error) {
-      showNotification('error', error.message);
-    } finally {
-      setIsLoading(false);
+    // 1. Devolver el libro
+    const response = await LibraryAPI.returnLoan(loanId);
+    
+    if (!response.success) {
+      throw new Error(response.error || 'Error al devolver el libro');
     }
-  };
+
+    // 2. Recargar TODOS los datos del servidor
+    await refetchRequests();
+    await refetchBooks();
+
+    // 3. Mostrar confirmación
+    showNotification('success', `📚 Libro devuelto exitosamente`);
+
+  } catch (error) {
+    console.error('Error en handleReturnBook:', error);
+    showNotification('error', error.message);
+    
+    // Recargar datos incluso si hay error
+    await refetchRequests();
+    await refetchBooks();
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   // =====================================================
   // RENDER
