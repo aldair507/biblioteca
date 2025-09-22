@@ -6,9 +6,9 @@ def run():
 
     roles = [
         {"rol": "Administrador", "prioridad": 1},
-        {"rol": "Coordinador",   "prioridad": 2},
+        {"rol": "Coordinador",   "prioridad": 4},
         {"rol": "Docente",       "prioridad": 3},
-        {"rol": "Estudiante",    "prioridad": 4},
+        {"rol": "Estudiante",    "prioridad": 2},
     ]
 
     for r in roles:

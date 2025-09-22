@@ -7,7 +7,7 @@ from app.models.request import Request
 from app.models.user import User
 from app.models.book import Book
 from app.models.role import Role
-from app.services.request_service import get_requests_pila
+from app.services.request_service import get_requests_pila, delete_request
 
 router = APIRouter(prefix="/requests", tags=["Requests"])
 
@@ -15,55 +15,105 @@ router = APIRouter(prefix="/requests", tags=["Requests"])
 # Crear una solicitud
 @router.post("/")
 def create_request(user_id: int, book_id: int, db: Session = Depends(get_db)):
+    
     # 1️⃣ Verificar que existan usuario y libro
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User.id.label("id_user"),User.nombre.label("nombre"),Role.id.label('id_rol'),Role.rol.label('rol'),
+    Role.prioridad.label('prioridad')).join(Role, Role.id == User.role_id).filter(User.id == user_id).first()
+    book = db.query(Book).filter(Book.id == book_id).first()
+    
     if not user:
         return {"error": "Usuario no encontrado"}
 
-    book = db.query(Book).filter(Book.id == book_id).first()
-
-    if book.cantidad < 1:
-        return {"error": "No hay copias disponibles"}
-
-    role = db.query(Role).filter(Role.id == user.role_id).first()
+    estado = "pendiente"
 
     # 2️⃣ Traer pila de solicitudes para este libro (ordenadas por prioridad y fecha)
     requests = get_requests_pila(db, book_id)
+    
+    # 3️⃣ Definir un estado en caso de que haya prestamos del libro
+    if not requests:
+        estado = "Prestado"
+        # Creación de la solicitud
+        new_request = Request(user_id=user_id, book_id=book_id, estado=estado)
+        db.add(new_request)
+        db.commit()
+        db.refresh(new_request)
 
-    # 3️⃣ Validar prioridad frente a los que ya están en la pila
-    # for req in requests:
-    #     r_user = db.query(User).filter(User.id == req.user_id).first()
-    #     r_role = db.query(Role).filter(Role.id == r_user.role_id).first()
+        return {
+            "message": "Solicitud creada exitosamente",
+            "request_id": new_request.id,
+            "usuario": user.nombre,
+            "rol": user.rol,
+            "prioridad": user.prioridad,
+        }
+    else:
+        estado = "pendiente"
+        pendientes = []
+
+        # 4️⃣ Se oganizan los datos 
+        for req in requests:
+            if req.estado_libro == "pendiente":
+                pendientes.append({
+                    "id_request": req.id_request,
+                    "id_user": req.id_user,
+                    "id_rol": req.id_rol,
+                    "prioridad": req.prioridad,
+                    "id_book": req.id_book,
+                    "titulo": req.titulo,
+                    "estado_libro": req.estado_libro,
+                })
+                # 5️⃣ Se elimina cada linea pendiente para posterior cargue
+                # reorganizados
+                delete_request(db, req.id_request)
+
+        # 6️⃣ Se añade al final de la lista la nueva solicitud
+        pendientes.append({
+            "id_request": 0,
+            "id_user": user.id_user,
+            "id_rol": user.id_rol,
+            "prioridad": user.prioridad,
+            "id_book": book_id,
+            "titulo": book.titulo,
+            "estado_libro": estado,
+        })
         
-    #     if role.prioridad > r_role.prioridad:
-    #         return {
-    #             "error": "Un usuario con mayor prioridad ya está en la fila",
-    #             "usuario": r_user.nombre,
-    #             "rol": r_role.rol
-    #         }
+        # 7️⃣ Se añade al final de la lista la nueva solicitud
+        print("Orden Anterior")
+        for pendiente in pendientes:
+            print('-----------')
+            print('id_request = ',pendiente['id_request'])
+            print('id_user = ',pendiente['id_user'])
+            print('id_rol = ',pendiente['id_rol'])
+            print('prioridad = ',pendiente['prioridad'])
+            print('id_book = ',pendiente['id_book'])
+            print('titulo = ',pendiente['titulo'])
+            print('estado_libro = ',pendiente['estado_libro'])
+        
+        # 8️⃣ Se reorganza la cola
+        pendientes = sorted(pendientes, key=lambda x: x["prioridad"], reverse=True)
 
-    # 4️⃣ Si pasó las validaciones, ahora sí crear la solicitud
-    new_request = Request(user_id=user_id, book_id=book_id, estado="pendiente")
-    db.add(new_request)
-    db.commit()
-    db.refresh(new_request)
+        # 9️⃣ Muestra del nuevo orden
+        print("Orden nuevo")
+        for pendiente in pendientes:
+            print('-----------')
+            print('id_request = ',pendiente['id_request'])
+            print('id_user = ',pendiente['id_user'])
+            print('id_rol = ',pendiente['id_rol'])
+            print('prioridad = ',pendiente['prioridad'])
+            print('id_book = ',pendiente['id_book'])
+            print('titulo = ',pendiente['titulo'])
+            print('estado_libro = ',pendiente['estado_libro'])
 
-    # 5️⃣ Recalcular pila para obtener posición final
-    requests = get_requests_pila(db, book_id)
-    posicion = next(
-        (i + 1 for i, r in enumerate(requests) if r.id == new_request.id),
-        None
-    )
+        # 1️⃣0️⃣ Reprganozación de las solicitudes para su registro
+        for pendiente in pendientes:
+            new_request = Request(user_id=pendiente['id_user'], book_id=pendiente['id_book'], estado=estado)
+            db.add(new_request)
+            db.commit()
+            db.refresh(new_request)
 
-    return {
-        "message": "Solicitud creada exitosamente",
-        "request_id": new_request.id,
-        "usuario": user.nombre,
-        "rol": role.rol,
-        "prioridad": role.prioridad,
-        "posicion_en_pila": posicion
-    }
-
+        return {
+            "message": "Solicitudes reorganizadas segun prioridad y orden de llegada",
+        }
+    
 
 # Listar solicitudes
 @router.get("/")

@@ -7,8 +7,8 @@ router = APIRouter()
 
 # Crear un libro
 @router.post("/")
-def create_book(titulo: str, autor: str, cantidad: int = 1, db: Session = Depends(get_db)):
-    book = Book(titulo=titulo, autor=autor, cantidad=cantidad)
+def create_book(titulo: str, autor: str, db: Session = Depends(get_db)):
+    book = Book(titulo=titulo, autor=autor, )
     db.add(book)
     db.commit()
     db.refresh(book)

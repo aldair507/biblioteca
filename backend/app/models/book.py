@@ -7,4 +7,3 @@ class Book(Base):
     id = Column(Integer, primary_key=True, index=True)
     titulo = Column(String, index=True)
     autor = Column(String, index=True)
-    cantidad = Column(Integer, default=1)
