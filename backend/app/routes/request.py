@@ -9,6 +9,7 @@ from app.models.user import User
 from app.models.book import Book
 from app.models.role import Role
 from app.services.request_service import get_requests_pila, delete_request, find_request
+from app.nodos.nodo import ListaPendientes
 
 router = APIRouter(prefix="/requests", tags=["Requests"])
 
@@ -54,7 +55,7 @@ def create_request(user_id: int, book_id: int, db: Session = Depends(get_db)):
         }
     else:
         estado = "pendiente"
-        pendientes = []
+        pendientes = ListaPendientes()
 
         # 4️⃣ Se oganizan los datos 
         for req in requests:
@@ -85,7 +86,7 @@ def create_request(user_id: int, book_id: int, db: Session = Depends(get_db)):
         
         # 7️⃣ Se añade al final de la lista la nueva solicitud
         print("Orden Anterior")
-        for pendiente in pendientes:
+        for pendiente in pendientes.recorrer_forward():
             print('-----------')
             print('id_request = ',pendiente['id_request'])
             print('id_user = ',pendiente['id_user'])
@@ -96,11 +97,11 @@ def create_request(user_id: int, book_id: int, db: Session = Depends(get_db)):
             print('estado_libro = ',pendiente['estado_libro'])
         
         # 8️⃣ Se reorganza la cola
-        pendientes = sorted(pendientes, key=lambda x: x["prioridad"], reverse=True)
+        pendientes.sort_by_prioridad()
 
         # 9️⃣ Muestra del nuevo orden
         print("Orden nuevo")
-        for pendiente in pendientes:
+        for pendiente in pendientes.recorrer_forward():
             print('-----------')
             print('id_request = ',pendiente['id_request'])
             print('id_user = ',pendiente['id_user'])
@@ -111,7 +112,7 @@ def create_request(user_id: int, book_id: int, db: Session = Depends(get_db)):
             print('estado_libro = ',pendiente['estado_libro'])
 
         # 1️⃣0️⃣ Reprganozación de las solicitudes para su registro
-        for pendiente in pendientes:
+        for pendiente in pendientes.recorrer_forward():
             new_request = Request(user_id=pendiente['id_user'], book_id=pendiente['id_book'], estado=estado)
             db.add(new_request)
             db.commit()
