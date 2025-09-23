@@ -38,7 +38,7 @@ class LibraryAPI {
       };
     } catch (error) {
       console.error("Error creating loan:", error);
-      const errorMessage = error.response?.data?.error || error.message;
+      const errorMessage = error.response?.data?.error || error.response?.data?.detail || error.message;
       return {
         success: false,
         error: errorMessage
@@ -55,7 +55,7 @@ class LibraryAPI {
       };
     } catch (error) {
       console.error("Error creating reservation:", error);
-      const errorMessage = error.response?.data?.error || error.message;
+      const errorMessage = error.response?.data?.error || error.response?.data?.detail || error.message;
       return {
         success: false,
         error: errorMessage
@@ -65,14 +65,19 @@ class LibraryAPI {
 
   static async returnLoan(loanId) {
     try {
-      const response = await updateRequest(loanId, { estado: 'devuelto' });
+      console.log('Marcando préstamo como Disponible ID:', loanId);
+      
+      const response = await updateRequest(loanId, { 
+        estado: 'Disponible' 
+      });
+      
       return {
         success: true,
         data: response
       };
     } catch (error) {
       console.error("Error returning loan:", error);
-      const errorMessage = error.response?.data?.error || error.message;
+      const errorMessage = error.response?.data?.detail || error.response?.data?.error || error.message;
       return {
         success: false,
         error: errorMessage
@@ -96,8 +101,10 @@ const useApiData = (apiCall, dependencies = []) => {
       setError(null);
       const result = await apiCall();
       setData(result);
+      return result;
     } catch (err) {
       setError(err.message);
+      return [];
     } finally {
       setLoading(false);
     }
@@ -197,6 +204,55 @@ export default function LibrarySystemBackendReady() {
   const loans = allRequests.filter(req => req.estado === 'Prestado');
   const reservations = allRequests.filter(req => req.estado === 'pendiente');
 
+  // =====================================================
+  // FUNCIÓN CORREGIDA PARA DETERMINAR DISPONIBILIDAD
+  // =====================================================
+
+const getBookAvailability = (bookId, requests) => {
+  // Un libro está disponible si NO tiene requests activos (Prestado o pendiente)
+  const activeRequests = requests.filter(req => 
+    req.book_id === bookId && 
+    (req.estado === 'Prestado' || req.estado === 'pendiente')
+  );
+  return activeRequests.length === 0;
+};
+
+// O mejor aún, una función más específica:
+const getBookStatus = (bookId, requests, currentUserId) => {
+  const activeLoans = requests.filter(req => 
+    req.book_id === bookId && req.estado === 'Prestado'
+  );
+  
+  const pendingReservations = requests.filter(req => 
+    req.book_id === bookId && req.estado === 'pendiente'
+  );
+  
+  const userActiveLoan = activeLoans.find(loan => loan.user_id === currentUserId);
+  const userReservation = pendingReservations.find(res => res.user_id === currentUserId);
+  
+  if (activeLoans.length === 0 && pendingReservations.length === 0) {
+    return { status: 'available', text: '✅ Disponible' };
+  } else if (userActiveLoan) {
+    return { status: 'user_loan', text: '📖 En tu poder' };
+  } else if (activeLoans.length > 0) {
+    return { status: 'loaned', text: '📖 Prestado' };
+  } else if (userReservation) {
+    const position = ReservationUtils.getUserPosition(pendingReservations, currentUserId, roles);
+    return { status: 'user_reservation', text: `📋 Tu reserva (#${position})` };
+  } else {
+    return { status: 'reserved', text: `📋 ${pendingReservations.length} en reserva` };
+  }
+};
+
+// Y adicionalmente, una función para saber si se puede reservar
+const canBeReserved = (bookId, requests) => {
+  const bookLoans = requests.filter(req => 
+    req.book_id === bookId && req.estado === 'Prestado'
+  );
+  
+  // Se puede reservar si está prestado (alguien lo tiene)
+  return bookLoans.length > 0;
+};
   // Configurar ROLE_CONFIG cuando se cargan los roles
   useEffect(() => {
     if (roles.length > 0) {
@@ -264,7 +320,7 @@ export default function LibrarySystemBackendReady() {
   }).filter(item => item.total > 0);
 
   // =====================================================
-  // LÓGICA DE NEGOCIO CON API REAL
+  // LÓGICA DE NEGOCIO CORREGIDA
   // =====================================================
 
   const validateLoanRequest = async (bookId, userId) => {
@@ -280,8 +336,12 @@ export default function LibrarySystemBackendReady() {
       throw new Error('Configuración de rol no encontrada');
     }
 
+    // Verificar préstamos del usuario actual
     const userLoans = loans.filter(l => l.user_id === userId);
     const userReservations = reservations.filter(r => r.user_id === userId);
+
+    // CORREGIDO: Verificar si el libro está prestado (por cualquier usuario)
+    const isBookAvailable = getBookAvailability(bookId, allRequests);
 
     if (userLoans.some(loan => loan.book_id === bookId)) {
       throw new Error(`Ya tienes prestado "${book.titulo}"`);
@@ -295,7 +355,7 @@ export default function LibrarySystemBackendReady() {
       throw new Error(`Ya tienes una reserva activa para "${book.titulo}"`);
     }
 
-    return { book, user, userRoleConfig };
+    return { book, user, userRoleConfig, isBookAvailable };
   };
 
   const handleLoanRequest = async (bookId) => {
@@ -303,12 +363,16 @@ export default function LibrarySystemBackendReady() {
     
     setIsLoading(true);
     try {
-      const { book, user, userRoleConfig } = await validateLoanRequest(bookId, currentUser.id);
+      const { book, user, userRoleConfig, isBookAvailable } = await validateLoanRequest(bookId, currentUser.id);
 
-      const bookLoans = loans.filter(l => l.book_id === bookId);
-      const isAvailable = bookLoans.length === 0;
+      console.log('📖 Estado del libro:', {
+        libro: book.titulo,
+        disponible: isBookAvailable,
+        requests: allRequests.filter(req => req.book_id === bookId).map(req => ({id: req.id, estado: req.estado, usuario: req.user_id}))
+      });
 
-      if (isAvailable) {
+      if (isBookAvailable) {
+        // Libro disponible - crear préstamo directo
         const response = await LibraryAPI.createLoan({
           user_id: user.id,
           book_id: book.id
@@ -321,6 +385,7 @@ export default function LibrarySystemBackendReady() {
           throw new Error(response.error || 'Error al crear el préstamo');
         }
       } else {
+        // Libro NO disponible (alguien más lo tiene) - crear reserva
         const response = await LibraryAPI.createReservation({
           user_id: user.id,
           book_id: book.id
@@ -352,31 +417,48 @@ const handleReturnBook = async (loanId) => {
     const loan = loans.find(l => l.id === loanId);
     if (!loan) throw new Error('Préstamo no encontrado');
 
-    // 1. Devolver el libro
-    const response = await LibraryAPI.returnLoan(loanId);
-    
-    if (!response.success) {
-      throw new Error(response.error || 'Error al devolver el libro');
+    // Marcar préstamo como devuelto
+    await updateRequest(loanId, { estado: 'Devuelto' });
+
+    // Refrescar requests
+    let updatedRequests = await refetchRequests();
+    setAllRequests(updatedRequests);
+
+    // Buscar reservas pendientes para este libro
+    let pendingReservations = updatedRequests.filter(
+      req => req.estado === 'pendiente' && req.book_id === loan.book_id
+    );
+
+    if (pendingReservations.length > 0) {
+      // Ordenar por prioridad y fecha
+      const sortedReservations = ReservationUtils.sortByPriority(pendingReservations, roles);
+      const nextReservation = sortedReservations[0];
+      const nextUser = users.find(u => u.id === nextReservation.user_id);
+
+      // Convertir reserva directamente en préstamo
+      await updateRequest(nextReservation.id, { estado: 'Prestado' });
+
+      // Refrescar requests y libros
+      updatedRequests = await refetchRequests();
+      setAllRequests(updatedRequests);
+      await refetchBooks();
+
+      const book = books.find(b => b.id === loan.book_id);
+      showNotification('info', `📢 "${book?.titulo}" asignado automáticamente a ${nextUser?.nombre}`);
+    } else {
+      // Si no hay reservas pendientes, libro queda disponible
+      const book = books.find(b => b.id === loan.book_id);
+      showNotification('success', `📚 "${book?.titulo}" devuelto correctamente y disponible`);
     }
-
-    // 2. Recargar TODOS los datos del servidor
-    await refetchRequests();
-    await refetchBooks();
-
-    // 3. Mostrar confirmación
-    showNotification('success', `📚 Libro devuelto exitosamente`);
-
   } catch (error) {
-    console.error('Error en handleReturnBook:', error);
-    showNotification('error', error.message);
-    
-    // Recargar datos incluso si hay error
-    await refetchRequests();
-    await refetchBooks();
+    console.error('❌ Error en handleReturnBook:', error);
+    showNotification('error', `Error: ${error.message}`);
   } finally {
     setIsLoading(false);
   }
 };
+
+
 
   // =====================================================
   // RENDER
@@ -468,24 +550,13 @@ const handleReturnBook = async (loanId) => {
         </div>
 
         {/* Botón para mostrar lista global de reservas */}
-        <div className="flex justify-between items-center">
+        <div className="flex justify-start">
           <button
             onClick={() => setShowGlobalReservations(!showGlobalReservations)}
             className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
           >
             <List className="h-5 w-5" />
             {showGlobalReservations ? 'Ocultar' : 'Mostrar'} Lista Global de Reservas
-          </button>
-          
-          <button
-            onClick={() => {
-              refetchRequests();
-              refetchBooks();
-            }}
-            disabled={isLoading}
-            className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50"
-          >
-            🔄 Actualizar Datos
           </button>
         </div>
 
@@ -594,7 +665,7 @@ const handleReturnBook = async (loanId) => {
           </div>
         )}
 
-        {/* Catálogo y Panel de Usuario (solo se muestra cuando NO está visible la lista global) */}
+        {/* Catálogo y Panel de Usuario */}
         {!showGlobalReservations && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Catálogo */}
@@ -609,9 +680,10 @@ const handleReturnBook = async (loanId) => {
                 <div className="p-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {books.map((book) => {
-                      const bookLoans = loans.filter(l => l.book_id === book.id);
-                      const available = bookLoans.length === 0;
+                      // Usar la función corregida para determinar disponibilidad
+                      const available = getBookAvailability(book.id, allRequests);
                       const bookReservations = reservations.filter(r => r.book_id === book.id);
+                      const bookLoans = loans.filter(l => l.book_id === book.id);
                       
                       return (
                         <div key={book.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
@@ -624,10 +696,13 @@ const handleReturnBook = async (loanId) => {
                             </div>
                             <div className="text-right">
                               <p className={`text-sm font-medium ${available ? 'text-green-600' : 'text-red-600'}`}>
-                                {available ? 'Disponible' : 'Prestado'}
+                                {available ? '✅ Disponible' : '📖 Prestado'}
                               </p>
                               <p className="text-xs text-gray-500">
                                 {bookReservations.length} en reserva
+                              </p>
+                              <p className="text-xs text-gray-400">
+                                {bookLoans.length} prestados
                               </p>
                             </div>
                           </div>
@@ -645,6 +720,11 @@ const handleReturnBook = async (loanId) => {
                               {isLoading ? '⏳ Procesando...' : 
                               available ? '📚 Solicitar Préstamo' : '📋 Hacer Reserva'}
                             </button>
+                            
+                            {/* Debug info - solo en desarrollo */}
+                            <div className="text-xs text-gray-400 p-2 bg-gray-50 rounded">
+                              <p>Estados: {allRequests.filter(r => r.book_id === book.id).map(r => r.estado).join(', ') || 'Sin requests'}</p>
+                            </div>
                           </div>
                         </div>
                       );

@@ -30,14 +30,22 @@ export const createRequest = async (user_id, book_id) => {
     throw error;
   }
 };
-
-// También necesitas la función updateRequest
+// En tu archivo api/api.js - CORREGIR updateRequest
 export const updateRequest = async (request_id, updateData) => {
   try {
+    console.log('Enviando update para request:', request_id, 'con datos:', updateData);
+    
+    // Probemos diferentes formatos según lo que espere tu backend
     const response = await api.put(`/requests/requests/${request_id}`, updateData);
+    
+    console.log('Respuesta del servidor:', response.data);
     return response.data;
   } catch (error) {
     console.error('Error updating request:', error);
+    if (error.response) {
+      console.error('Error response data:', error.response.data);
+      console.error('Error status:', error.response.status);
+    }
     throw error;
   }
 };

@@ -1,5 +1,6 @@
 # app/routes/request.py
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import datetime
 from app.services.database import get_db
@@ -11,6 +12,8 @@ from app.services.request_service import get_requests_pila, delete_request
 
 router = APIRouter(prefix="/requests", tags=["Requests"])
 
+class RequestUpdate(BaseModel):
+    estado: str
 
 # Crear una solicitud
 @router.post("/")
@@ -123,11 +126,12 @@ def list_requests(db: Session = Depends(get_db)):
 
 # Cambiar BD segun la pila de una solicitud
 @router.put("/{request_id}")
-def update_request(request_id: int, db: Session = Depends(get_db)):
+def update_request(request_id: int, update_data: RequestUpdate, db: Session = Depends(get_db)):
     request = db.query(Request).filter(Request.id == request_id).first()
     if not request:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
 
+    request.estado = update_data.estado 
     db.commit()
     db.refresh(request)
     return request
