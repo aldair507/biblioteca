@@ -21,11 +21,11 @@ def create_request(user_id: int, book_id: int, db: Session = Depends(get_db)):
     Role.prioridad.label('prioridad')).join(Role, Role.id == User.role_id).filter(User.id == user_id).first()
     book = db.query(Book).filter(Book.id == book_id).first()
 
-    ex_req = find_request(db, user_id, book)
+    ex_req = find_request(db, user_id, book_id)
     
     if not user:
         return {"error": "Usuario no encontrado"}
-    if not ex_req:
+    if ex_req:
         return {"error": "Ya existe una solicitud anterior"}
 
     estado = "pendiente"
@@ -135,3 +135,7 @@ def update_request(request_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(request)
     return request
+
+@router.delete("/{request_id}")
+def destroy_request(request_id: int, db: Session = Depends(get_db)):
+    return delete_request(db, request_id)
