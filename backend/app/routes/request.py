@@ -7,7 +7,7 @@ from app.models.request import Request
 from app.models.user import User
 from app.models.book import Book
 from app.models.role import Role
-from app.services.request_service import get_requests_pila, delete_request
+from app.services.request_service import get_requests_pila, delete_request, find_request
 
 router = APIRouter(prefix="/requests", tags=["Requests"])
 
@@ -20,9 +20,13 @@ def create_request(user_id: int, book_id: int, db: Session = Depends(get_db)):
     user = db.query(User.id.label("id_user"),User.nombre.label("nombre"),Role.id.label('id_rol'),Role.rol.label('rol'),
     Role.prioridad.label('prioridad')).join(Role, Role.id == User.role_id).filter(User.id == user_id).first()
     book = db.query(Book).filter(Book.id == book_id).first()
+
+    ex_req = find_request(db, user_id, book)
     
     if not user:
         return {"error": "Usuario no encontrado"}
+    if not ex_req:
+        return {"error": "Ya existe una solicitud anterior"}
 
     estado = "pendiente"
 

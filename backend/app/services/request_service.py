@@ -20,6 +20,10 @@ def get_requests_pila(db: Session, book_id: int):
     )
     return requests
 
+def find_request(db: Session, user_id: int, book_id: int):
+    req = db.query(Request).filter(Request.user_id == user_id, Request.book_id == book_id, Request.estado.in_(['Prestado', 'pendiente'])).first()
+    return req
+
 def delete_request(db: Session, request_id: int):
     req = db.query(Request).filter(Request.id == request_id).first()
     if req:
