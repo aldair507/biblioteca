@@ -49,6 +49,11 @@ export const updateRequest = async (request_id, updateData) => {
     throw error;
   }
 };
+export const deleteRequest = async (request_id) => {
+  const response = await api.delete(`/requests/requests/${request_id}`);
+  return response.data;
+};
+
 export const getRequests = async () => {
   const response = await api.get("/requests/requests/");
   return response.data;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Book, User, Calendar, AlertCircle, Users, Crown, GraduationCap, BookOpen, Clock, Loader, List, Search } from "lucide-react";
-import { getBooks, getRequests, getRoles, getUsers, createRequest, updateRequest } from "./api/api";
+import { getBooks, getRequests, getRoles, getUsers, createRequest, updateRequest,deleteRequest } from "./api/api";
 
 // =====================================================
 // SERVICIOS - Usando tu API real
@@ -22,6 +22,16 @@ class LibraryAPI {
   static async getReservations() {
     const requests = await getRequests();
     return requests.filter(req => req.estado === 'pendiente');
+  }
+   static async deleteRequest(requestId) {
+    try {
+      const response = await deleteRequest(requestId);
+      return { success: true, data: response };
+    } catch (error) {
+      console.error("Error deleting request:", error);
+      const errorMessage = error.response?.data?.error || error.message;
+      return { success: false, error: errorMessage };
+    }
   }
 
   static async getLoans() {
@@ -235,7 +245,13 @@ const getBookStatus = (bookId, requests, currentUserId) => {
   } else if (userActiveLoan) {
     return { status: 'user_loan', text: '📖 En tu poder' };
   } else if (activeLoans.length > 0) {
-    return { status: 'loaned', text: '📖 Prestado' };
+    // Mostrar información del préstamo actual
+    const currentLoan = activeLoans[0];
+    const loanUser = users.find(u => u.id === currentLoan.user_id);
+    return { 
+      status: 'loaned', 
+      text: `📖 Prestado a ${loanUser?.nombre || 'usuario'}` 
+    };
   } else if (userReservation) {
     const position = ReservationUtils.getUserPosition(pendingReservations, currentUserId, roles);
     return { status: 'user_reservation', text: `📋 Tu reserva (#${position})` };
@@ -412,52 +428,58 @@ const canBeReserved = (bookId, requests) => {
   };
 
 const handleReturnBook = async (loanId) => {
+  if (isLoading) return;
   setIsLoading(true);
+
   try {
     const loan = loans.find(l => l.id === loanId);
     if (!loan) throw new Error('Préstamo no encontrado');
 
-    // Marcar préstamo como devuelto
-    await updateRequest(loanId, { estado: 'Devuelto' });
+    // 1️⃣ Cambiar el estado del préstamo a "Disponible" en lugar de eliminarlo
+    const returnResp = await LibraryAPI.returnLoan(loanId); // <-- Usamos returnLoan que hace update
+    if (!returnResp.success) throw new Error(returnResp.error);
 
-    // Refrescar requests
-    let updatedRequests = await refetchRequests();
-    setAllRequests(updatedRequests);
-
-    // Buscar reservas pendientes para este libro
-    let pendingReservations = updatedRequests.filter(
-      req => req.estado === 'pendiente' && req.book_id === loan.book_id
-    );
+    // 2️⃣ Revisar reservas pendientes para este libro
+    const pendingReservations = allRequests
+      .filter(r => r.book_id === loan.book_id && r.estado === 'pendiente');
 
     if (pendingReservations.length > 0) {
-      // Ordenar por prioridad y fecha
       const sortedReservations = ReservationUtils.sortByPriority(pendingReservations, roles);
       const nextReservation = sortedReservations[0];
-      const nextUser = users.find(u => u.id === nextReservation.user_id);
 
-      // Convertir reserva directamente en préstamo
-      await updateRequest(nextReservation.id, { estado: 'Prestado' });
+      // Crear préstamo automáticamente para el siguiente en la cola
+      const loanResp = await LibraryAPI.createLoan({
+        user_id: nextReservation.user_id,
+        book_id: nextReservation.book_id
+      });
 
-      // Refrescar requests y libros
-      updatedRequests = await refetchRequests();
-      setAllRequests(updatedRequests);
-      await refetchBooks();
+      if (loanResp.success) {
+        // Cambiar el estado de la reserva a "Prestado" en lugar de eliminarla
+        const updateReservationResp = await updateRequest(nextReservation.id, { 
+          estado: 'Prestado' 
+        });
 
-      const book = books.find(b => b.id === loan.book_id);
-      showNotification('info', `📢 "${book?.titulo}" asignado automáticamente a ${nextUser?.nombre}`);
+        const nextUser = users.find(u => u.id === nextReservation.user_id);
+        const book = books.find(b => b.id === nextReservation.book_id);
+        showNotification('success', `📚 "${book?.titulo}" prestado automáticamente a ${nextUser?.nombre}`);
+      } else {
+        throw new Error(loanResp.error || 'Error al crear el préstamo para el siguiente en cola');
+      }
     } else {
-      // Si no hay reservas pendientes, libro queda disponible
       const book = books.find(b => b.id === loan.book_id);
-      showNotification('success', `📚 "${book?.titulo}" devuelto correctamente y disponible`);
+      showNotification('success', `📚 "${book?.titulo}" devuelto correctamente`);
     }
+
+    // 3️⃣ Actualizar estado local
+    await refetchRequests();
+
   } catch (error) {
-    console.error('❌ Error en handleReturnBook:', error);
-    showNotification('error', `Error: ${error.message}`);
+    console.error('Error en devolución:', error);
+    showNotification('error', error.message);
   } finally {
     setIsLoading(false);
   }
 };
-
 
 
   // =====================================================
